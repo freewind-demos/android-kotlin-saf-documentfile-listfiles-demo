@@ -3,6 +3,7 @@ package com.freewind.saf.listfiles
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -32,11 +33,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * SAF + DocumentFile.listFiles() 最小 Demo。
+ * SAF DocumentFile 耗时对比 Demo。
  *
- * 关键点：listFiles() 返回的每个 DocumentFile 在内存里只带了 Uri；
- * getName / isDirectory / length 等都会再查 ContentResolver，属于额外访问。
- * 本 Demo 只打印「不额外访问」就能拿到的信息：数组长度 + 每项 Uri。
+ * 选目录后扫描：分别计时 listFiles / fetch all names / fetch all sizes。
+ * 不打印 name/size 细节，只 append 动作名与耗时。
  */
 class MainActivity : ComponentActivity() {
 
@@ -46,8 +46,8 @@ class MainActivity : ComponentActivity() {
     // 用户选中的目录树 Uri；未选为 null
     private var treeUri by mutableStateOf<Uri?>(null)
 
-    // 扫描结果文案，展示在界面上
-    private var outputText by mutableStateOf("先点「选择目录」，再点「扫描」。")
+    // 耗时日志（只 append 动作行，无细节）
+    private var outputText by mutableStateOf("先点「选择目录」，再点「扫描」看耗时。")
 
     // 扫描中禁用按钮，避免重复点
     private var scanning by mutableStateOf(false)
@@ -69,8 +69,8 @@ class MainActivity : ComponentActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             contentResolver.takePersistableUriPermission(uri, flags)
             treeUri = uri
-            outputText = "已选目录：\n$uri\n\n点「扫描」调用 listFiles()。"
-            Log.i(tag, "treeUri=$uri")
+            outputText = "已选目录（不打印 Uri 细节）。\n点「扫描」开始计时。"
+            Log.i(tag, "treeUri selected")
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,8 +91,8 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            text = "listFiles() 后只打印不额外访问 FS 的信息：数组长度 + 每项 Uri。" +
-                                "（name/type/length/isDirectory 等会再查 provider，本步不做）",
+                            text = "对比耗时：listFiles → fetch all names → fetch all sizes。" +
+                                "不打印细节，只看每步 ms。",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Button(
@@ -130,24 +130,21 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** 在 IO 线程调用 DocumentFile.listFiles()，再回到主线程刷新 UI。 */
+    /** 主线程启动；重活在 IO；每完成一步就 append 一行耗时。 */
     private fun startScan() {
         val uri = treeUri
             ?: error("未选择目录却触发了扫描")
         scanning = true
-        outputText = "扫描中…"
+        outputText = "扫描开始…"
         scanJob?.cancel()
         scanJob = CoroutineScope(Dispatchers.Main.immediate).launch {
             try {
-                val report = withContext(Dispatchers.IO) {
-                    listFilesUrisOnly(uri)
-                }
-                outputText = report
-                Log.i(tag, report)
+                runTimedScan(uri)
+                appendLine("done")
             } catch (e: Exception) {
-                // 失败必须可见：写 UI + Log，不吞异常语义（错误态展示）
+                // 失败必须可见
                 val msg = "扫描失败: ${e.message}"
-                outputText = msg
+                appendLine(msg)
                 Log.e(tag, msg, e)
             } finally {
                 scanning = false
@@ -156,29 +153,56 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 对选中目录做一层 listFiles()。
+     * 三步计时：
+     * 1) listFiles
+     * 2) 遍历取 name（每项会查 ContentResolver）
+     * 3) 遍历取 length/size（每项再查）
      *
-     * DocumentFile.listFiles() 实现里只收集子项 Uri，再包装成 DocumentFile[]。
-     * 因此数组上「不额外访问文件系统」能拿到的只有：
-     * 1) 数组长度
-     * 2) 每个元素的 getUri()
-     *
-     * 若再调 getName() / isDirectory() / length() 等，都会对 ContentResolver 再查询。
+     * 细节不输出；用 sink 防止编译器把读取优化掉。
      */
-    private fun listFilesUrisOnly(treeUri: Uri): String {
-        val root = DocumentFile.fromTreeUri(this, treeUri)
-            ?: error("DocumentFile.fromTreeUri 返回 null，uri=$treeUri")
-        // listFiles 本身是一次 provider 列举；阻塞，须在 Dispatchers.IO
-        val children = root.listFiles()
-        val lines = ArrayList<String>(children.size + 4)
-        lines += "listFiles() 返回数组长度: ${children.size}"
-        lines += "（每项仅打印 Uri；未调 name/type/length/isDirectory）"
-        lines += ""
-        children.forEachIndexed { index, child ->
-            // getUri() 读内存字段，不再访问 FS
-            val childUri = child.uri
-            lines += "[$index] $childUri"
+    private suspend fun runTimedScan(treeUri: Uri) {
+        val root = withContext(Dispatchers.IO) {
+            DocumentFile.fromTreeUri(this@MainActivity, treeUri)
+                ?: error("DocumentFile.fromTreeUri 返回 null")
         }
-        return lines.joinToString("\n")
+
+        // —— 1) listFiles ——
+        val listStarted = SystemClock.elapsedRealtime()
+        val children = withContext(Dispatchers.IO) {
+            root.listFiles()
+        }
+        val listMs = SystemClock.elapsedRealtime() - listStarted
+        appendLine("listFiles: ${children.size} items, ${listMs} ms")
+
+        // —— 2) fetch all names ——
+        val namesStarted = SystemClock.elapsedRealtime()
+        val nameSink = withContext(Dispatchers.IO) {
+            // sink：累加，避免 JIT 认为读取无副作用而消除
+            var sink = 0
+            for (child in children) {
+                sink += child.name?.length ?: 0
+            }
+            sink
+        }
+        val namesMs = SystemClock.elapsedRealtime() - namesStarted
+        appendLine("fetch all names: ${namesMs} ms (sink=$nameSink)")
+
+        // —— 3) fetch all sizes ——
+        val sizesStarted = SystemClock.elapsedRealtime()
+        val sizeSink = withContext(Dispatchers.IO) {
+            var sink = 0L
+            for (child in children) {
+                sink += child.length()
+            }
+            sink
+        }
+        val sizesMs = SystemClock.elapsedRealtime() - sizesStarted
+        appendLine("fetch all sizes: ${sizesMs} ms (sink=$sizeSink)")
+    }
+
+    /** 往界面与 Logcat append 一行（已在主协程上下文时可直接调）。 */
+    private fun appendLine(line: String) {
+        outputText = outputText + "\n" + line
+        Log.i(tag, line)
     }
 }
