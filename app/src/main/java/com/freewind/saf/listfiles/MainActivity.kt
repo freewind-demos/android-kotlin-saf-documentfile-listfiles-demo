@@ -36,7 +36,12 @@ import kotlinx.coroutines.withContext
  * SAF DocumentFile 耗时对比 Demo。
  *
  * 选目录后扫描四步计时：listFiles → uris → names → sizes。
- * 每步结果放进数组防优化；界面只 append 动作名、条数、ms，不打细节。
+ * 每步结果放进数组防优化；每步完成后 append 条数、ms，并 append 前 5 条样本。
+ *
+ * TreeDocumentFile（listFiles 子项）内存里几乎只有 Uri：
+ * - 纯内存：uri / getUri()
+ * - 再查 ContentResolver：name / type / isDirectory / isFile /
+ *   lastModified / length / exists / canRead / canWrite
  */
 class MainActivity : ComponentActivity() {
 
@@ -46,7 +51,7 @@ class MainActivity : ComponentActivity() {
     // 用户选中的目录树 Uri；未选为 null
     private var treeUri by mutableStateOf<Uri?>(null)
 
-    // 耗时日志（只 append 动作行，无细节）
+    // 耗时日志（动作行 + 每步前 5 条样本）
     private var outputText by mutableStateOf("先点「选择目录」，再点「扫描」看耗时。")
 
     // 扫描中禁用按钮，避免重复点
@@ -69,7 +74,7 @@ class MainActivity : ComponentActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             contentResolver.takePersistableUriPermission(uri, flags)
             treeUri = uri
-            outputText = "已选目录（不打印 Uri 细节）。\n点「扫描」开始计时。"
+            outputText = "已选目录。\n点「扫描」开始计时。"
             Log.i(tag, "treeUri selected")
         }
 
@@ -92,7 +97,16 @@ class MainActivity : ComponentActivity() {
                         )
                         Text(
                             text = "对比耗时：listFiles → fetch uris → fetch names → fetch sizes。" +
-                                "结果进数组；只报条数与 ms，不打细节。",
+                                "结果进数组；每步报条数与 ms，并 append 前 5 条。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        // listFiles 子项（TreeDocumentFile）字段来源说明
+                        Text(
+                            text = "listFiles() 子项内存字段：\n" +
+                                "• 纯内存可读：uri / getUri()\n" +
+                                "• 会查 ContentResolver（非纯内存）：" +
+                                "name、type、isDirectory、isFile、" +
+                                "lastModified、length、exists、canRead、canWrite",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Button(
@@ -159,7 +173,7 @@ class MainActivity : ComponentActivity() {
      * 3) 遍历取 name → 放进数组
      * 4) 遍历取 length → 放进数组
      *
-     * 打印只报操作 + 条数 + ms；数组本身不展开。
+     * 每步：报操作 + 条数 + ms，再 append 该步结果前 5 条（看形态，不计时）。
      */
     private suspend fun runTimedScan(treeUri: Uri) {
         val root = withContext(Dispatchers.IO) {
@@ -174,6 +188,8 @@ class MainActivity : ComponentActivity() {
         }
         val listMs = SystemClock.elapsedRealtime() - listStarted
         appendLine("listFiles: ${children.size} items, ${listMs} ms")
+        // listFiles 后内存里主要是 Uri，样本打 child.uri
+        appendSample("listFiles", children.map { it.uri.toString() })
 
         // —— 2) fetch all uris ——
         val urisStarted = SystemClock.elapsedRealtime()
@@ -186,6 +202,7 @@ class MainActivity : ComponentActivity() {
         }
         val urisMs = SystemClock.elapsedRealtime() - urisStarted
         appendLine("fetch all uris: ${uris.size} items, ${urisMs} ms")
+        appendSample("uris", uris.map { it.toString() })
 
         // —— 3) fetch all names ——
         val namesStarted = SystemClock.elapsedRealtime()
@@ -198,6 +215,7 @@ class MainActivity : ComponentActivity() {
         }
         val namesMs = SystemClock.elapsedRealtime() - namesStarted
         appendLine("fetch all names: ${names.size} items, ${namesMs} ms")
+        appendSample("names", names.map { it ?: "null" })
 
         // —— 4) fetch all sizes ——
         val sizesStarted = SystemClock.elapsedRealtime()
@@ -210,10 +228,6 @@ class MainActivity : ComponentActivity() {
         }
         val sizesMs = SystemClock.elapsedRealtime() - sizesStarted
         appendLine("fetch all sizes: ${sizes.size} items, ${sizesMs} ms")
-
-        // 末尾各列前 5 条样本，方便看形态（不计时）
-        appendSample("uris", uris.map { it.toString() })
-        appendSample("names", names.map { it ?: "null" })
         appendSample("sizes", sizes.map { it.toString() })
     }
 

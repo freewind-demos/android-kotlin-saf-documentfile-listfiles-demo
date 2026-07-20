@@ -2,7 +2,12 @@
 
 ## 简介
 
-演示 SAF 下四步耗时：`listFiles` → fetch uris → fetch names → fetch sizes。每步结果放进数组；界面只报操作名、条数、ms，不打印细节。
+演示 SAF 下四步耗时：`listFiles` → fetch uris → fetch names → fetch sizes。每步结果进数组；完成后 append 前 5 条样本。
+
+`listFiles()` 子项（TreeDocumentFile）字段来源：
+
+- 纯内存：`uri` / `getUri()`
+- 会查 ContentResolver：`name`、`type`、`isDirectory`、`isFile`、`lastModified`、`length`、`exists`、`canRead`、`canWrite`
 
 ## 快速开始
 
@@ -27,12 +32,12 @@
 
 ## 注意事项
 
-- `listFiles()` 只装子项；`uri` 读内存字段通常很快；`name` / `length()` 会再查 ContentResolver。
-- 输出示例：`listFiles: N items, X ms` → `fetch all uris: N items, Y ms` → `fetch all names: …` → `fetch all sizes: …`。
+- `listFiles()` 子项内存里几乎只有 Uri；`name` / `length()` 等会再查 ContentResolver。
+- 每步输出：`操作: N items, X ms` + `sample (first 5)`。
 - Logcat 过滤 tag：`SafListFiles`。
 
 ## 教程
 
 1. **背景**：对比「列目录」与「再读 uri/name/size」的成本。
-2. **原理**：四段 `SystemClock.elapsedRealtime()`；结果进 `ArrayList`，打印只用 `.size`。
+2. **原理**：四段 `SystemClock.elapsedRealtime()`；结果进 `ArrayList`；每步后 append 前 5。
 3. **关键代码**：见 `MainActivity.runTimedScan`。
