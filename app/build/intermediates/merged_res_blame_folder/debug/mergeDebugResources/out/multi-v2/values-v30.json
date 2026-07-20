@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.freewind.saf.listfiles.app-mergeDebugResources-57:/values-v30/values-v30.xml",
+            "map": [
+                {
+                    "source": "/Users/peng.li/.gradle/caches/transforms-4/ace3fdb9303e933a28ae8d4af45617c9/transformed/material3/res/values-v30/values-v30.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "72",
+                        "endOffsets": "123"
+                    }
+                }
+            ]
+        }
+    ]
+}
