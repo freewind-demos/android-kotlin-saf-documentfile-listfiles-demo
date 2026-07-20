@@ -31,12 +31,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 /**
  * SAF DocumentFile 耗时对比 Demo。
  *
  * 选目录后扫描四步计时：listFiles → uris → names → sizes。
- * 每步结果放进数组防优化；每步完成后 append 条数、ms，并 append 前 5 条样本。
+ * 每大步开始前先 append「开始…」；完成后 append 条数、ms + 前 5 条样本；块之间空一行。
  *
  * TreeDocumentFile（listFiles 子项）内存里几乎只有 Uri：
  * - 纯内存：uri / getUri()
@@ -97,7 +98,7 @@ class MainActivity : ComponentActivity() {
                         )
                         Text(
                             text = "对比耗时：listFiles → fetch uris → fetch names → fetch sizes。" +
-                                "结果进数组；每步报条数与 ms，并 append 前 5 条。",
+                                "每大步前先报「开始…」；完成后报条数/ms + 前 5 条；块之间空行。",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         // listFiles 子项（TreeDocumentFile）字段来源说明
@@ -144,7 +145,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** 主线程启动；重活在 IO；每完成一步就 append 一行耗时。 */
+    /** 主线程启动；重活在 IO；每大步前先 append「开始…」。 */
     private fun startScan() {
         val uri = treeUri
             ?: error("未选择目录却触发了扫描")
@@ -173,7 +174,7 @@ class MainActivity : ComponentActivity() {
      * 3) 遍历取 name → 放进数组
      * 4) 遍历取 length → 放进数组
      *
-     * 每步：报操作 + 条数 + ms，再 append 该步结果前 5 条（看形态，不计时）。
+     * 每大步：先 append「开始…」→ 计时执行 → 报条数/ms → 前 5 条 → 空行。
      */
     private suspend fun runTimedScan(treeUri: Uri) {
         val root = withContext(Dispatchers.IO) {
@@ -182,6 +183,7 @@ class MainActivity : ComponentActivity() {
         }
 
         // —— 1) listFiles ——
+        awaitStart("开始 listFiles")
         val listStarted = SystemClock.elapsedRealtime()
         val children = withContext(Dispatchers.IO) {
             root.listFiles()
@@ -190,8 +192,10 @@ class MainActivity : ComponentActivity() {
         appendLine("listFiles: ${children.size} items, ${listMs} ms")
         // listFiles 后内存里主要是 Uri，样本打 child.uri
         appendSample("listFiles", children.map { it.uri.toString() })
+        appendBlank()
 
         // —— 2) fetch all uris ——
+        awaitStart("开始 fetch all uris")
         val urisStarted = SystemClock.elapsedRealtime()
         val uris = withContext(Dispatchers.IO) {
             ArrayList<Uri>(children.size).also { out ->
@@ -203,8 +207,10 @@ class MainActivity : ComponentActivity() {
         val urisMs = SystemClock.elapsedRealtime() - urisStarted
         appendLine("fetch all uris: ${uris.size} items, ${urisMs} ms")
         appendSample("uris", uris.map { it.toString() })
+        appendBlank()
 
         // —— 3) fetch all names ——
+        awaitStart("开始 fetch all names")
         val namesStarted = SystemClock.elapsedRealtime()
         val names = withContext(Dispatchers.IO) {
             ArrayList<String?>(children.size).also { out ->
@@ -216,8 +222,10 @@ class MainActivity : ComponentActivity() {
         val namesMs = SystemClock.elapsedRealtime() - namesStarted
         appendLine("fetch all names: ${names.size} items, ${namesMs} ms")
         appendSample("names", names.map { it ?: "null" })
+        appendBlank()
 
         // —— 4) fetch all sizes ——
+        awaitStart("开始 fetch all sizes")
         val sizesStarted = SystemClock.elapsedRealtime()
         val sizes = withContext(Dispatchers.IO) {
             ArrayList<Long>(children.size).also { out ->
@@ -229,6 +237,18 @@ class MainActivity : ComponentActivity() {
         val sizesMs = SystemClock.elapsedRealtime() - sizesStarted
         appendLine("fetch all sizes: ${sizes.size} items, ${sizesMs} ms")
         appendSample("sizes", sizes.map { it.toString() })
+        appendBlank()
+    }
+
+    /** 大步开始前 append，并 yield 让 UI 先画出「开始…」。 */
+    private suspend fun awaitStart(message: String) {
+        appendLine(message)
+        yield()
+    }
+
+    /** 块之间空一行。 */
+    private fun appendBlank() {
+        appendLine("")
     }
 
     /** 把某数组前 5 条 append 到界面；空则标明 empty。 */

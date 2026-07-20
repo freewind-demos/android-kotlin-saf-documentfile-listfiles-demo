@@ -2,7 +2,7 @@
 
 ## 简介
 
-演示 SAF 下四步耗时：`listFiles` → fetch uris → fetch names → fetch sizes。每步结果进数组；完成后 append 前 5 条样本。
+演示 SAF 下四步耗时：`listFiles` → fetch uris → fetch names → fetch sizes。每大步前先 append「开始…」；完成后 append 前 5 条；块之间空行。
 
 `listFiles()` 子项（TreeDocumentFile）字段来源：
 
