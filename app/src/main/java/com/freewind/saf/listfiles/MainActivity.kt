@@ -211,8 +211,19 @@ class MainActivity : ComponentActivity() {
         val sizesMs = SystemClock.elapsedRealtime() - sizesStarted
         appendLine("fetch all sizes: ${sizes.size} items, ${sizesMs} ms")
 
-        // 引用数组，防止被判定无用而消除（仍不打印细节）
+        // 引用 names/sizes，防判定无用；细节仍不展开
         Log.d(tag, "kept arrays: uris=${uris.size}, names=${names.size}, sizes=${sizes.size}")
+
+        // 最后展示前 5 条 Uri，方便看长什么样（可从 documentId 猜名）
+        appendLine("--- sample uris (first 5) ---")
+        val sampleCount = minOf(5, uris.size)
+        if (sampleCount == 0) {
+            appendLine("(empty)")
+        } else {
+            for (i in 0 until sampleCount) {
+                appendLine("[$i] ${uris[i]}")
+            }
+        }
     }
 
     /** 往界面与 Logcat append 一行（已在主协程上下文时可直接调）。 */
