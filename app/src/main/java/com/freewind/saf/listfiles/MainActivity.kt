@@ -35,8 +35,8 @@ import kotlinx.coroutines.withContext
 /**
  * SAF DocumentFile 耗时对比 Demo。
  *
- * 选目录后扫描：分别计时 listFiles / fetch all names / fetch all sizes。
- * 不打印 name/size 细节，只 append 动作名与耗时。
+ * 选目录后扫描四步计时：listFiles → uris → names → sizes。
+ * 每步结果放进数组防优化；界面只 append 动作名、条数、ms，不打细节。
  */
 class MainActivity : ComponentActivity() {
 
@@ -91,8 +91,8 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            text = "对比耗时：listFiles → fetch all names → fetch all sizes。" +
-                                "不打印细节，只看每步 ms。",
+                            text = "对比耗时：listFiles → fetch uris → fetch names → fetch sizes。" +
+                                "结果进数组；只报条数与 ms，不打细节。",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Button(
@@ -153,12 +153,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 三步计时：
+     * 四步计时：
      * 1) listFiles
-     * 2) 遍历取 name（每项会查 ContentResolver）
-     * 3) 遍历取 length/size（每项再查）
+     * 2) 遍历取 uri → 放进数组
+     * 3) 遍历取 name → 放进数组
+     * 4) 遍历取 length → 放进数组
      *
-     * 细节不输出；用 sink 防止编译器把读取优化掉。
+     * 打印只报操作 + 条数 + ms；数组本身不展开。
      */
     private suspend fun runTimedScan(treeUri: Uri) {
         val root = withContext(Dispatchers.IO) {
@@ -174,30 +175,44 @@ class MainActivity : ComponentActivity() {
         val listMs = SystemClock.elapsedRealtime() - listStarted
         appendLine("listFiles: ${children.size} items, ${listMs} ms")
 
-        // —— 2) fetch all names ——
-        val namesStarted = SystemClock.elapsedRealtime()
-        val nameSink = withContext(Dispatchers.IO) {
-            // sink：累加，避免 JIT 认为读取无副作用而消除
-            var sink = 0
-            for (child in children) {
-                sink += child.name?.length ?: 0
+        // —— 2) fetch all uris ——
+        val urisStarted = SystemClock.elapsedRealtime()
+        val uris = withContext(Dispatchers.IO) {
+            ArrayList<Uri>(children.size).also { out ->
+                for (child in children) {
+                    out.add(child.uri)
+                }
             }
-            sink
+        }
+        val urisMs = SystemClock.elapsedRealtime() - urisStarted
+        appendLine("fetch all uris: ${uris.size} items, ${urisMs} ms")
+
+        // —— 3) fetch all names ——
+        val namesStarted = SystemClock.elapsedRealtime()
+        val names = withContext(Dispatchers.IO) {
+            ArrayList<String?>(children.size).also { out ->
+                for (child in children) {
+                    out.add(child.name)
+                }
+            }
         }
         val namesMs = SystemClock.elapsedRealtime() - namesStarted
-        appendLine("fetch all names: ${namesMs} ms (sink=$nameSink)")
+        appendLine("fetch all names: ${names.size} items, ${namesMs} ms")
 
-        // —— 3) fetch all sizes ——
+        // —— 4) fetch all sizes ——
         val sizesStarted = SystemClock.elapsedRealtime()
-        val sizeSink = withContext(Dispatchers.IO) {
-            var sink = 0L
-            for (child in children) {
-                sink += child.length()
+        val sizes = withContext(Dispatchers.IO) {
+            ArrayList<Long>(children.size).also { out ->
+                for (child in children) {
+                    out.add(child.length())
+                }
             }
-            sink
         }
         val sizesMs = SystemClock.elapsedRealtime() - sizesStarted
-        appendLine("fetch all sizes: ${sizesMs} ms (sink=$sizeSink)")
+        appendLine("fetch all sizes: ${sizes.size} items, ${sizesMs} ms")
+
+        // 引用数组，防止被判定无用而消除（仍不打印细节）
+        Log.d(tag, "kept arrays: uris=${uris.size}, names=${names.size}, sizes=${sizes.size}")
     }
 
     /** 往界面与 Logcat append 一行（已在主协程上下文时可直接调）。 */

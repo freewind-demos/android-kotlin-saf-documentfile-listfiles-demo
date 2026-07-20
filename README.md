@@ -2,7 +2,7 @@
 
 ## 简介
 
-演示 SAF 下 `DocumentFile.listFiles()`、再逐项取 `name`、再逐项取 `length` 的耗时差异。界面只 append 动作名与 ms，不打印文件细节。
+演示 SAF 下四步耗时：`listFiles` → fetch uris → fetch names → fetch sizes。每步结果放进数组；界面只报操作名、条数、ms，不打印细节。
 
 ## 快速开始
 
@@ -27,12 +27,12 @@
 
 ## 注意事项
 
-- `listFiles()` 只拿到子项 Uri；随后 `name` / `length()` 会对 ContentResolver 再查，通常更慢。
-- 输出示例：`listFiles: N items, X ms` → `fetch all names: Y ms` → `fetch all sizes: Z ms`。
+- `listFiles()` 只装子项；`uri` 读内存字段通常很快；`name` / `length()` 会再查 ContentResolver。
+- 输出示例：`listFiles: N items, X ms` → `fetch all uris: N items, Y ms` → `fetch all names: …` → `fetch all sizes: …`。
 - Logcat 过滤 tag：`SafListFiles`。
 
 ## 教程
 
-1. **背景**：想对比「只列目录」与「再读元数据」的成本。
-2. **原理**：选目录 → 扫描 → 三段 `SystemClock.elapsedRealtime()` 计时；用 sink 累加防止读取被优化掉。
+1. **背景**：对比「列目录」与「再读 uri/name/size」的成本。
+2. **原理**：四段 `SystemClock.elapsedRealtime()`；结果进 `ArrayList`，打印只用 `.size`。
 3. **关键代码**：见 `MainActivity.runTimedScan`。
